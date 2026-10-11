@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>ZAHS · School administration</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div id="login" class="login">
+      <form id="login-form" class="login-card">
+        <div class="crest">Z</div>
+        <p class="eyebrow">AKADEMIK ZƏRİFƏ ƏLİYEVA ADINA LİSEY</p>
+        <h1>School, connected.</h1>
+        <p class="muted">ZAHS administration · Authorized staff only</p>
+        <label
+          >Email<input
+            name="email"
+            type="email"
+            autocomplete="username"
+            required /></label
+        ><label
+          >Password<input
+            name="password"
+            type="password"
+            autocomplete="current-password"
+            required /></label
+        ><button>Sign in to administration →</button>
+        <p id="login-error" role="alert"></p>
+      </form>
+    </div>
+    <div id="shell" hidden>
+      <aside>
+        <a class="brand" href="#dashboard"
+          ><span class="crest small">Z</span
+          ><span>ZAHS<small>ADMINISTRATION</small></span></a
+        >
+        <p class="nav-label">SCHOOL WORKSPACE</p>
+        <nav id="navigation"></nav>
+        <div class="sidebar-foot">
+          <span class="status-dot"></span> Shared school database<button
+            id="logout"
+            class="ghost"
+          >
+            Sign out ↗
+          </button>
+        </div>
+      </aside>
+      <main>
+        <header>
+          <div>
+            <p class="eyebrow">YOUR SCHOOL, IN ONE PLACE</p>
+            <h1 id="page-title">Overview</h1>
+          </div>
+          <button id="refresh" class="secondary">↻ Refresh</button>
+        </header>
+        <div id="content"></div>
+      </main>
+    </div>
+    <dialog id="dialog">
+      <form id="edit-form">
+        <div class="dialog-head">
+          <h2 id="dialog-title"></h2>
+          <button type="button" class="ghost" id="close-dialog">✕</button>
+        </div>
+        <div id="form-fields"></div>
+        <p id="form-error" role="alert"></p>
+        <button id="save">Save changes</button>
+      </form>
+    </dialog>
+    <div id="toast" role="status" hidden></div>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

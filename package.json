@@ -1,0 +1,1 @@
+{"name":"zahs-admin","private":true,"type":"module","scripts":{"lint":"eslint app.js build.mjs","format":"prettier --write app.js style.css index.html eslint.config.js build.mjs","build":"node build.mjs"},"devDependencies":{"eslint":"^10.12.0","prettier":"^3.9.10"}}
