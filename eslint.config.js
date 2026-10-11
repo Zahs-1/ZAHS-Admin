@@ -14,6 +14,8 @@ export default [
         URL: "readonly",
         URLSearchParams: "readonly",
         setTimeout: "readonly",
+        clearTimeout: "readonly",
+        AbortController: "readonly",
         location: "readonly",
         confirm: "readonly",
         prompt: "readonly",

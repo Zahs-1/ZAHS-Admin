@@ -19,18 +19,15 @@
         <h1>School, connected.</h1>
         <p class="muted">ZAHS administration · Authorized staff only</p>
         <label
-          >Email<input
-            id="login-email"
-            type="email"
-            autocomplete="username"
-            required /></label
-        ><label
-          >Password<input
-            id="login-password"
+          >Administrator code<input
+            id="login-code"
             type="password"
-            autocomplete="current-password"
-            required /></label
-        ><button type="submit" disabled>Sign in to administration →</button>
+            autocomplete="off"
+            minlength="12"
+            maxlength="128"
+            required
+        /></label>
+        <button type="submit" disabled>Sign in to administration →</button>
         <p id="login-error" role="alert"></p>
       </form>
     </div>
@@ -74,7 +71,7 @@
       </form>
     </dialog>
     <div id="toast" role="status" hidden></div>
-    <script src="./config.js"></script>
-    <script type="module" src="./app.js"></script>
+    <script src="./config.js?v=admin-code-1"></script>
+    <script type="module" src="./app.js?v=admin-code-1"></script>
   </body>
 </html>

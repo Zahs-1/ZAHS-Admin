@@ -2,7 +2,7 @@ const API_BASE = window.ZAHS_CONFIG?.apiBaseUrl?.replace(/\/$/, "") || "";
 const cleanUrl = new URL(window.location.href);
 let hadCredentialsInUrl = false;
 for (const name of [...cleanUrl.searchParams.keys()]) {
-  if (["email", "password"].includes(name.toLowerCase())) {
+  if (["email", "password", "code"].includes(name.toLowerCase())) {
     cleanUrl.searchParams.delete(name);
     hadCredentialsInUrl = true;
   }
@@ -141,28 +141,33 @@ async function start() {
 $("#login-form").onsubmit = async (e) => {
   e.preventDefault();
   const submit = e.submitter || $("#login-form button[type=submit]");
+  const submitLabel = submit.textContent;
   submit.disabled = true;
+  submit.textContent = "Checking code…";
   $("#login-error").textContent = "";
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
   try {
     if (!API_BASE)
       throw Error(
         "Admin API configuration is missing. Please contact administration.",
       );
     const data = {
-      email: $("#login-email").value.trim(),
-      password: $("#login-password").value,
+      code: $("#login-code").value.trim(),
     };
-    const r = await fetch(API_BASE + "/auth/login", {
+    const r = await fetch(API_BASE + "/auth/admin-code", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
+      signal: controller.signal,
     });
     if (!r.ok) {
       const messages = {
-        401: "Incorrect email or password",
+        401: "Incorrect administrator code",
         403: "Administrator account required",
-        422: "Enter a valid email and password",
+        422: "Enter a valid administrator code",
         429: "Too many attempts. Try again in 15 minutes.",
+        503: "Administrator code sign-in is not configured on the server. Contact administration.",
       };
       throw Error(
         messages[r.status] ||
@@ -177,11 +182,15 @@ $("#login-form").onsubmit = async (e) => {
     await start();
   } catch (e) {
     $("#login-error").textContent =
-      e instanceof TypeError
-        ? "Unable to connect to the sign-in service. Please try again."
-        : e.message;
+      e.name === "AbortError"
+        ? "Sign-in timed out. Please try again."
+        : e instanceof TypeError
+          ? "Unable to connect to the sign-in service. Please try again."
+          : e.message;
   } finally {
-    $("#login-password").value = "";
+    clearTimeout(timeout);
+    $("#login-code").value = "";
+    submit.textContent = submitLabel;
     submit.disabled = false;
   }
 };

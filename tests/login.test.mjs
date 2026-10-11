@@ -14,6 +14,7 @@ const workspace = resolve(adminRoot, "..");
 const productionApi = "https://zahs-backend-production-5988.up.railway.app/api";
 const email = "login-browser@zahs.test";
 const password = "Disposable-login-test-password1";
+const code = "Disposable-admin-code-123456";
 let server, backend, browser, temporary, site, apiBase;
 const wait = (milliseconds) =>
   new Promise((done) => setTimeout(done, milliseconds));
@@ -63,6 +64,8 @@ before(async () => {
       STORAGE_PROVIDER: "local",
       PUSH_PROVIDER: "noop",
       PORT: String(apiPort),
+      ADMIN_LOGIN_CODE: code,
+      ADMIN_LOGIN_USER_ID: "login-test-admin",
       ALLOWED_ORIGINS: site + ",https://zahs-1.github.io",
       ZAHS_ORIGINS: "https://unused-origin.example",
       PYTHONPATH: [
@@ -109,8 +112,10 @@ after(async () => {
 test("production artifacts load config before app and use the real HTTPS API", async () => {
   const html = await readFile(join(adminRoot, "dist/index.html"), "utf8");
   const config = await readFile(join(adminRoot, "dist/config.js"), "utf8");
-  assert.ok(html.indexOf('src="./config.js"') < html.indexOf('src="./app.js"'));
+  assert.ok(html.indexOf('src="./config.js') < html.indexOf('src="./app.js'));
   assert.ok(config.includes(productionApi));
+  assert.ok(!config.includes(code));
+  assert.ok(!html.includes("login-email") && !html.includes("login-password"));
   assert.ok(!html.includes("/dashboard.html"));
 });
 
@@ -121,16 +126,15 @@ test("POST JSON login, dashboard reload and logout work under /ZAHS-Admin/", asy
   page.on("pageerror", (error) => errors.push(error.message));
   page.on("request", (request) => requests.push(request));
   await page.goto(site + "/ZAHS-Admin/");
-  await page.locator("#login-email").fill(email);
-  await page.locator("#login-password").fill(password);
+  await page.locator("#login-code").fill(code);
   await page.locator("#login-form button").click();
   await page.locator("#shell").waitFor({ state: "visible" });
   await page.locator("#content .metric").first().waitFor({ state: "visible" });
   const login = requests.find(
-    (request) => request.url() === apiBase + "/auth/login",
+    (request) => request.url() === apiBase + "/auth/admin-code",
   );
   assert.equal(login.method(), "POST");
-  assert.deepEqual(login.postDataJSON(), { email, password });
+  assert.deepEqual(login.postDataJSON(), { code });
   assert.ok(login.headers()["content-type"].includes("application/json"));
   assert.equal(new URL(page.url()).pathname, "/ZAHS-Admin/");
   assert.equal(new URL(page.url()).search, "");
@@ -154,28 +158,29 @@ test("POST JSON login, dashboard reload and logout work under /ZAHS-Admin/", asy
     ),
   );
   assert.ok(
-    requests.every((request) => !/[?&](email|password)=/i.test(request.url())),
+    requests.every(
+      (request) => !/[?&](email|password|code)=/i.test(request.url()),
+    ),
   );
   assert.deepEqual(errors, []);
   await page.close();
 });
 
-test("wrong password displays an error without navigation or credential disclosure", async () => {
+test("wrong code displays an error without navigation or credential disclosure", async () => {
   const page = await browser.newPage();
   await page.goto(site + "/ZAHS-Admin/");
-  await page.locator("#login-email").fill(email);
-  await page.locator("#login-password").fill("Wrong-disposable-password");
-  await page.locator("#login-password").press("Enter");
+  await page.locator("#login-code").fill("Wrong-disposable-admin-code");
+  await page.locator("#login-code").press("Enter");
   await page
     .locator("#login-error")
-    .filter({ hasText: "Incorrect email or password" })
+    .filter({ hasText: "Incorrect administrator code" })
     .waitFor();
   assert.equal(page.url(), site + "/ZAHS-Admin/");
   assert.equal(await page.locator("#shell").isVisible(), false);
-  assert.equal(await page.locator("#login-password").inputValue(), "");
+  assert.equal(await page.locator("#login-code").inputValue(), "");
   assert.ok(
     !(await page.locator("body").innerText()).includes(
-      "Wrong-disposable-password",
+      "Wrong-disposable-admin-code",
     ),
   );
   await page.close();
@@ -183,12 +188,11 @@ test("wrong password displays an error without navigation or credential disclosu
 
 test("missing app JavaScript cannot submit credentials or change the page URL", async () => {
   const page = await browser.newPage();
-  await page.route("**/app.js", (route) => route.abort());
+  await page.route("**/app.js*", (route) => route.abort());
   await page.goto(site + "/ZAHS-Admin/");
-  await page.locator("#login-email").fill(email);
-  await page.locator("#login-password").fill(password);
+  await page.locator("#login-code").fill(code);
   assert.equal(await page.locator("#login-form button").isDisabled(), true);
-  await page.locator("#login-password").press("Enter");
+  await page.locator("#login-code").press("Enter");
   await page.evaluate(() => document.querySelector("#login-form").submit());
   await wait(150);
   assert.equal(page.url(), site + "/ZAHS-Admin/");
@@ -198,7 +202,8 @@ test("missing app JavaScript cannot submit credentials or change the page URL", 
 test("old credential query parameters are removed from the current history entry", async () => {
   const page = await browser.newPage();
   await page.goto(
-    site + "/ZAHS-Admin/?email=old-test&password=old-test#dashboard",
+    site +
+      "/ZAHS-Admin/?email=old-test&password=old-test&code=old-test#dashboard",
   );
   await page.waitForFunction(() => !location.search);
   assert.equal(new URL(page.url()).pathname, "/ZAHS-Admin/");
@@ -207,7 +212,7 @@ test("old credential query parameters are removed from the current history entry
 });
 
 test("CORS honors ALLOWED_ORIGINS and permits JSON/Bearer preflight", async () => {
-  const preflight = await fetch(apiBase + "/auth/login", {
+  const preflight = await fetch(apiBase + "/auth/admin-code", {
     method: "OPTIONS",
     headers: {
       Origin: site,
@@ -217,7 +222,7 @@ test("CORS honors ALLOWED_ORIGINS and permits JSON/Bearer preflight", async () =
   });
   assert.equal(preflight.status, 200);
   assert.equal(preflight.headers.get("access-control-allow-origin"), site);
-  const github = await fetch(apiBase + "/auth/login", {
+  const github = await fetch(apiBase + "/auth/admin-code", {
     method: "OPTIONS",
     headers: {
       Origin: "https://zahs-1.github.io",
@@ -230,7 +235,7 @@ test("CORS honors ALLOWED_ORIGINS and permits JSON/Bearer preflight", async () =
     github.headers.get("access-control-allow-origin"),
     "https://zahs-1.github.io",
   );
-  const denied = await fetch(apiBase + "/auth/login", {
+  const denied = await fetch(apiBase + "/auth/admin-code", {
     method: "OPTIONS",
     headers: {
       Origin: "https://untrusted.example",
@@ -260,21 +265,20 @@ test("expired session returns to login and clears the stored token", async () =>
   await page.close();
 });
 
-test("network failures and invalid login responses never disclose the password", async () => {
+test("network failures and invalid login responses never disclose the code", async () => {
   for (const mode of ["network", "invalid-json"]) {
     const page = await browser.newPage();
-    await page.route("**/api/auth/login", (route) =>
+    await page.route("**/api/auth/admin-code", (route) =>
       mode === "network"
         ? route.abort()
         : route.fulfill({
             status: 200,
             contentType: "text/html",
-            body: "Invalid response containing Disposable-login-test-password1",
+            body: "Invalid response containing Disposable-admin-code-123456",
           }),
     );
     await page.goto(site + "/ZAHS-Admin/");
-    await page.locator("#login-email").fill(email);
-    await page.locator("#login-password").fill(password);
+    await page.locator("#login-code").fill(code);
     await page.locator("#login-form button").click();
     await page
       .locator("#login-error")
@@ -284,8 +288,8 @@ test("network failures and invalid login responses never disclose the password",
       })
       .waitFor();
     assert.equal(page.url(), site + "/ZAHS-Admin/");
-    assert.ok(!(await page.locator("body").innerText()).includes(password));
-    assert.equal(await page.locator("#login-password").inputValue(), "");
+    assert.ok(!(await page.locator("body").innerText()).includes(code));
+    assert.equal(await page.locator("#login-code").inputValue(), "");
     await page.close();
   }
 });
