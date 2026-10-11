@@ -3,29 +3,34 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="form-action 'none'; base-uri 'self'; object-src 'none'"
+    />
     <title>ZAHS · School administration</title>
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
     <div id="login" class="login">
-      <form id="login-form" class="login-card">
+      <form id="login-form" class="login-card" method="post">
         <div class="crest">Z</div>
         <p class="eyebrow">AKADEMIK ZƏRİFƏ ƏLİYEVA ADINA LİSEY</p>
         <h1>School, connected.</h1>
         <p class="muted">ZAHS administration · Authorized staff only</p>
         <label
           >Email<input
-            name="email"
+            id="login-email"
             type="email"
             autocomplete="username"
             required /></label
         ><label
           >Password<input
-            name="password"
+            id="login-password"
             type="password"
             autocomplete="current-password"
             required /></label
-        ><button>Sign in to administration →</button>
+        ><button type="submit" disabled>Sign in to administration →</button>
         <p id="login-error" role="alert"></p>
       </form>
     </div>
@@ -69,6 +74,7 @@
       </form>
     </dialog>
     <div id="toast" role="status" hidden></div>
-    <script type="module" src="app.js"></script>
+    <script src="./config.js"></script>
+    <script type="module" src="./app.js"></script>
   </body>
 </html>

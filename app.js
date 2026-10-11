@@ -1,4 +1,18 @@
-const API_BASE = window.ZAHS_CONFIG.apiBaseUrl;
+const API_BASE = window.ZAHS_CONFIG?.apiBaseUrl?.replace(/\/$/, "") || "";
+const cleanUrl = new URL(window.location.href);
+let hadCredentialsInUrl = false;
+for (const name of [...cleanUrl.searchParams.keys()]) {
+  if (["email", "password"].includes(name.toLowerCase())) {
+    cleanUrl.searchParams.delete(name);
+    hadCredentialsInUrl = true;
+  }
+}
+if (hadCredentialsInUrl)
+  window.history.replaceState(
+    null,
+    "",
+    cleanUrl.pathname + cleanUrl.search + cleanUrl.hash,
+  );
 const $ = (s) => document.querySelector(s),
   esc = (v) =>
     String(v ?? "").replace(
@@ -77,6 +91,10 @@ const labels = {
   locale: "Locale",
 };
 async function api(path, method = "GET", body) {
+  if (!API_BASE)
+    throw Error(
+      "Admin API configuration is missing. Please contact administration.",
+    );
   let options = { method, headers: { Authorization: `Bearer ${token}` } };
   if (body instanceof FormData) options.body = body;
   else if (body !== undefined) {
@@ -122,26 +140,55 @@ async function start() {
 }
 $("#login-form").onsubmit = async (e) => {
   e.preventDefault();
-  const submit = e.submitter;
+  const submit = e.submitter || $("#login-form button[type=submit]");
   submit.disabled = true;
+  $("#login-error").textContent = "";
   try {
-    const data = Object.fromEntries(new FormData(e.target));
+    if (!API_BASE)
+      throw Error(
+        "Admin API configuration is missing. Please contact administration.",
+      );
+    const data = {
+      email: $("#login-email").value.trim(),
+      password: $("#login-password").value,
+    };
     const r = await fetch(API_BASE + "/auth/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
-    const j = await r.json();
-    if (!r.ok) throw Error(j.detail);
+    if (!r.ok) {
+      const messages = {
+        401: "Incorrect email or password",
+        403: "Administrator account required",
+        422: "Enter a valid email and password",
+        429: "Too many attempts. Try again in 15 minutes.",
+      };
+      throw Error(
+        messages[r.status] ||
+          "Sign-in service is unavailable. Please try again later.",
+      );
+    }
+    const j = await r.json().catch(() => null);
+    if (!j || typeof j.token !== "string" || !j.token)
+      throw Error("Invalid sign-in response. Please contact administration.");
     token = j.token;
     sessionStorage.setItem("zahs_admin", token);
     await start();
   } catch (e) {
-    $("#login-error").textContent = e.message;
+    $("#login-error").textContent =
+      e instanceof TypeError
+        ? "Unable to connect to the sign-in service. Please try again."
+        : e.message;
   } finally {
+    $("#login-password").value = "";
     submit.disabled = false;
   }
 };
+$("#login-form button[type=submit]").disabled = !API_BASE;
+if (!API_BASE)
+  $("#login-error").textContent =
+    "Admin API configuration is missing. Please contact administration.";
 $("#logout").onclick = async () => {
   try {
     await api("/auth/logout", "POST");

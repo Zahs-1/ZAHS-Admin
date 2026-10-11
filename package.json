@@ -1,1 +1,17 @@
-{"name":"zahs-admin","private":true,"type":"module","scripts":{"lint":"eslint app.js build.mjs","format":"prettier --write app.js style.css index.html eslint.config.js build.mjs","build":"node build.mjs"},"devDependencies":{"eslint":"^10.12.0","prettier":"^3.9.10"}}
+{
+  "name": "zahs-admin",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint": "eslint app.js build.mjs config.js tests/*.mjs",
+    "format": "prettier --write app.js style.css index.html eslint.config.js build.mjs",
+    "build": "node build.mjs",
+    "test": "node --test tests/login.test.mjs",
+    "build:production": "node build.mjs --production"
+  },
+  "devDependencies": {
+    "eslint": "^10.12.0",
+    "playwright": "^1.64.0",
+    "prettier": "^3.9.10"
+  }
+}

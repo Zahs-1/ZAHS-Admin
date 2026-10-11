@@ -1,6 +1,12 @@
 import { mkdir, copyFile, writeFile } from "node:fs/promises";
-const production = process.env.ENVIRONMENT === "production";
-const base = process.env.ADMIN_API_BASE_URL || (production ? "" : "/api");
+const production =
+  process.env.ENVIRONMENT === "production" ||
+  process.argv.includes("--production");
+const base =
+  process.env.ADMIN_API_BASE_URL ||
+  (production
+    ? "https://zahs-backend-production-5988.up.railway.app/api"
+    : "/api");
 if (production) {
   const url = new URL(base);
   if (
@@ -30,6 +36,7 @@ await writeFile(
     ";\n",
 );
 const origin = production ? new URL(base).origin : "'self'";
+await writeFile(new URL("dist/.nojekyll", import.meta.url), "");
 await writeFile(
   new URL("dist/_headers", import.meta.url),
   `/*\n  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob:; connect-src 'self' ${origin}; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'\n  X-Content-Type-Options: nosniff\n  Referrer-Policy: no-referrer\n  X-Frame-Options: DENY\n`,
