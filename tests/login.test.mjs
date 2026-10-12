@@ -166,6 +166,54 @@ test("POST JSON login, dashboard reload and logout work under /ZAHS-Admin/", asy
   await page.close();
 });
 
+test("schedule import defaults to auto detection and accepts both PDFs", async () => {
+  const page = await browser.newPage();
+  await page.goto(site + "/ZAHS-Admin/");
+  await page.locator("#login-code").fill(code);
+  await page.locator("#login-form button").click();
+  await page.locator("#shell").waitFor({ state: "visible" });
+  await page.locator('a[href="#schedules"]').first().click();
+  const type = page.locator('#import-form select[name="type"]');
+  await type.waitFor();
+  assert.equal(await type.inputValue(), "AUTO");
+  assert.equal(await type.evaluate((select) => select.checkValidity()), true);
+  assert.equal(
+    await page
+      .locator('#import-form input[name="file"]')
+      .evaluate((input) => input.multiple),
+    true,
+  );
+  await type.selectOption("TEACHER");
+  assert.equal(await type.inputValue(), "TEACHER");
+  assert.equal(await type.evaluate((select) => select.checkValidity()), true);
+  await type.selectOption("CLASS");
+  assert.equal(await type.inputValue(), "CLASS");
+  await type.selectOption("AUTO");
+  await page
+    .locator('#import-form input[name="version_label"]')
+    .fill("Two source PDFs QA");
+  await page
+    .locator('#import-form input[name="effective_from"]')
+    .fill("2026-09-22");
+  await page
+    .locator('#import-form input[name="file"]')
+    .setInputFiles([
+      join(workspace, "backend/tests/fixtures/classes.pdf"),
+      join(workspace, "backend/tests/fixtures/teachers.pdf"),
+    ]);
+  await page.locator("#import-form > button").click();
+  await page.waitForFunction(
+    () => document.querySelectorAll(".batch-review").length === 2,
+    null,
+    { timeout: 90000 },
+  );
+  const results = await page.locator("#import-results").innerText();
+  assert.match(results, /classes\.pdf · CLASS · 30 headings/);
+  assert.match(results, /teachers\.pdf · TEACHER · 56 headings/);
+  assert.ok(!results.includes("Unrecognized table identity"));
+  await page.close();
+});
+
 test("wrong code displays an error without navigation or credential disclosure", async () => {
   const page = await browser.newPage();
   await page.goto(site + "/ZAHS-Admin/");
