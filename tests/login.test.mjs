@@ -53,7 +53,7 @@ before(async () => {
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   site = `http://127.0.0.1:${server.address().port}`;
-  const script = `from backend import app as core\nwith core.db() as c:\n core.insert(c, 'users', {'id': 'login-test-admin', 'role': 'ADMIN', 'name': 'Login', 'surname': 'QA', 'email': '${email}', 'password_hash': core.password_hash('${password}')})\nfrom backend.parser import AscClassScheduleParser, AscTeacherScheduleParser\nfrom pathlib import Path\nfixtures=Path('backend/tests/fixtures')\ncodes={e['subject_code'] for parser,name in [(AscClassScheduleParser(),'classes.pdf'),(AscTeacherScheduleParser(),'teachers.pdf')] for e in parser.parse(fixtures/name)['entries']}\nwith core.db() as c:\n for code in sorted(codes):\n  ident=core.uid()\n  core.insert(c,'subjects',{'id':ident,'name':'Confirmed '+code})\n  core.insert(c,'subject_mappings',{'id':core.uid(),'source_code':code,'display_name':'Confirmed '+code,'subject_id':ident})\nfrom backend.entrypoint import main\nmain()`;
+  const script = `from backend import app as core\nwith core.db() as c:\n core.insert(c, 'users', {'id': 'login-test-admin', 'role': 'ADMIN', 'name': 'Login', 'surname': 'QA', 'email': '${email}', 'password_hash': core.password_hash('${password}')})\nfrom backend.entrypoint import main\nmain()`;
   backend = spawn(process.env.ZAHS_TEST_PYTHON || "python", ["-c", script], {
     cwd: workspace,
     env: {
@@ -201,6 +201,7 @@ test("schedule import defaults to auto detection and accepts both PDFs", async (
       join(workspace, "backend/tests/fixtures/classes.pdf"),
       join(workspace, "backend/tests/fixtures/teachers.pdf"),
     ]);
+  await page.locator('[name="effective_date_confirmed"]').check();
   await page.locator("#import-form > button").click();
   await page.waitForFunction(
     () => document.querySelectorAll(".batch-review").length === 2,
@@ -229,7 +230,7 @@ test("schedule import defaults to auto detection and accepts both PDFs", async (
   assert.equal(await page.locator("#schedule-grid tbody tr").count(), 56);
   assert.match(
     await page.locator("#schedule-grid").innerText(),
-    /awaiting teacher account/,
+    /Ready with warnings/,
   );
   page.on("dialog", (dialog) => dialog.accept());
   await page.locator("#import-tab").click();
@@ -247,12 +248,6 @@ test("schedule import defaults to auto detection and accepts both PDFs", async (
     .filter({ hasText: /TEACHER/ })
     .locator(".review")
     .click();
-  await page.locator("#ack-source-disagreements").waitFor();
-  assert.equal(
-    await page.locator("#ack-source-disagreements").isChecked(),
-    false,
-  );
-  await page.locator("#ack-source-disagreements").check();
   await page.locator("#publish").click();
   await page.locator("#import-form").waitFor();
   assert.equal(
@@ -375,6 +370,74 @@ test("expired session returns to login and clears the stored token", async () =>
   );
   assert.equal(await page.locator("#shell").isVisible(), false);
   assert.equal(new URL(page.url()).search, "");
+  await page.close();
+});
+
+test("import deletion requires a dialog and separate published confirmation", async () => {
+  const page = await browser.newPage();
+  await page.goto(site + "/ZAHS-Admin/");
+  await page.locator("#login-code").fill(code);
+  await page.locator("#login-form button").click();
+  await page.locator("#shell").waitFor({ state: "visible" });
+  const token = await page.evaluate(() => sessionStorage.getItem("zahs_admin"));
+  const headers = { Authorization: "Bearer " + token, "Content-Type": "application/json" };
+  const roster = await fetch(apiBase + "/classes").then((r) => r.json());
+  const create = async (label) => {
+    const result = await fetch(apiBase + "/admin/schedules/manual", {
+      method: "POST", headers, body: JSON.stringify({type: "CLASS", version_label: label, effective_from: "2026-09-21", entries: [{class_name: roster[0].name, subject_code: "UI/pending", weekday: 1, lesson_number: 1, start_time: "08:00", end_time: "08:45"}]}),
+    });
+    assert.equal(result.status, 201);
+    return result.json();
+  };
+  const draft = await create("Delete UI draft QA");
+  await page.locator('a[href="#schedules"]').first().click();
+  const draftRow = page.locator("tr").filter({hasText: "Delete UI draft QA"});
+  await draftRow.locator(".import-delete").click();
+  assert.match(await page.locator("#delete-import-dialog").innerText(), /2026-09-21.*CLASS/);
+  await page.locator("#cancel-import-delete").click();
+  assert.equal(await draftRow.count(), 1);
+  await draftRow.locator(".import-delete").click();
+  await page.locator("#confirm-import-delete").click();
+  await page.waitForFunction(() => !document.querySelector("#delete-import-dialog"));
+  await page.locator("#import-form").waitFor();
+  await draftRow.waitFor({ state: "detached" });
+  assert.equal(await draftRow.count(), 0);
+  assert.equal((await fetch(apiBase + "/admin/schedules/import/" + draft.id, {headers})).status, 404);
+  const published = await create("Delete UI published QA");
+  assert.equal((await fetch(apiBase + "/admin/schedules/import/" + published.id + "/publish", {method: "POST", headers, body: JSON.stringify({confirm: true})})).status, 200);
+  await page.locator("#import-tab").click();
+  const row = page.locator("tr").filter({hasText: "Delete UI published QA"});
+  await row.locator(".import-delete").click();
+  assert.equal(await page.locator("#confirm-import-delete").isDisabled(), true);
+  await page.locator("#confirm-published-delete").check();
+  assert.equal(await page.locator("#confirm-import-delete").isEnabled(), true);
+  await page.locator("#confirm-import-delete").click();
+  await page.waitForFunction(() => !document.querySelector("#delete-import-dialog"));
+  await page.locator("#import-form").waitFor();
+  await row.waitFor({ state: "detached" });
+  assert.equal(await row.count(), 0);
+  assert.ok(await page.locator("tr").filter({hasText: "Two source PDFs QA"}).count() >= 2);
+  await page.close();
+});
+
+test("filename date suggestion needs explicit confirmation and ignores ambiguous filenames", async () => {
+  const page = await browser.newPage();
+  await page.goto(site + "/ZAHS-Admin/");
+  await page.locator("#login-code").fill(code);
+  await page.locator("#login-form button").click();
+  await page.locator("#shell").waitFor({ state: "visible" });
+  await page.locator('a[href="#schedules"]').first().click();
+  const input = page.locator('[name="file"]');
+  await input.setInputFiles({name: "Version 21.09.2026.pdf", mimeType: "application/pdf", buffer: Buffer.from("date selection QA")});
+  assert.equal(await page.locator('[name="effective_from"]').inputValue(), "2026-09-21");
+  assert.equal(await page.locator('[name="effective_date_confirmed"]').isChecked(), false);
+  await page.locator('[name="effective_date_confirmed"]').check();
+  await page.locator('[name="effective_from"]').fill("2027-06-15");
+  assert.equal(await page.locator('[name="effective_date_confirmed"]').isChecked(), false);
+  await page.locator('[name="effective_from"]').fill("");
+  await input.setInputFiles({name: "21.09.2026 and 22.09.2026.pdf", mimeType: "application/pdf", buffer: Buffer.from("date selection QA")});
+  assert.equal(await page.locator('[name="effective_from"]').inputValue(), "");
+  assert.match(await page.locator("#date-hint").innerText(), /Choose and confirm/);
   await page.close();
 });
 

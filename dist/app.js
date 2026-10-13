@@ -64,7 +64,7 @@ const fields = {
   groups: ["name", "description", "subject"],
   news: ["title", "body", "media_id", "published_at", "is_published"],
   grades: ["value", "comment", "subject", "date"],
-  "subject-mappings": ["source_code", "display_name", "locale", "active"],
+  "subject-mappings": ["source_code", "display_name", "subject_id", "locale", "active"],
   "teacher-mappings": ["source_name", "teacher_id"],
 };
 const labels = {
@@ -438,6 +438,9 @@ async function edit(name, item = {}) {
   const listFields = fields[name] || [];
   let classes = [],
     teachers = [];
+  const subjects = name === "subject-mappings"
+    ? [...new Map((await allRecords("subject-mappings")).filter((mapping) => mapping.subject_id).map((mapping) => [mapping.subject_id, mapping])).values()]
+    : [];
   if (
     listFields.some((k) =>
       ["class_id", "class_teacher_id", "teacher_id"].includes(k),
@@ -452,6 +455,8 @@ async function edit(name, item = {}) {
   $("#form-error").textContent = "";
   $("#form-fields").innerHTML = listFields
     .map((k) => {
+      if (k === "subject_id")
+        return `<label>Canonical subject<select name="subject_id"><option value="">Use display name</option>${subjects.map((mapping) => `<option value="${esc(mapping.subject_id)}" ${mapping.subject_id === item.subject_id ? "selected" : ""}>${esc(mapping.display_name)}</option>`).join("")}</select></label>`;
       if (k === "media_id")
         return '<label>News photograph<input type="file" id="news-image" accept="image/png,image/jpeg,image/webp"></label><div id="image-preview"></div>';
       if (["active", "archived", "is_published"].includes(k))
@@ -465,6 +470,13 @@ async function edit(name, item = {}) {
       return `<label>${labels[k] || k}<input name="${k}" type="${k === "password" ? "password" : k === "email" ? "email" : k === "value" ? "number" : "text"}" value="${k === "password" ? "" : esc(item[k])}" ${k === "password" ? 'autocomplete="new-password"' : ""} placeholder="${k === "published_at" ? "2026-10-12T08:00:00+04:00" : ""}"></label>`;
     })
     .join("");
+  if (name === "subject-mappings") {
+    const selector = $("#form-fields [name=subject_id]");
+    selector.onchange = () => {
+      const mapping = subjects.find((subject) => subject.subject_id === selector.value);
+      if (mapping) $("#form-fields [name=display_name]").value = mapping.display_name;
+    };
+  }
   if ($("#news-image"))
     $("#news-image").onchange = () => {
       const f = $("#news-image").files[0];
@@ -645,7 +657,22 @@ async function settings() {
 async function schedules() {
   const history = await api("/admin/schedules/history");
   $("#content").innerHTML =
-    `<div class="tabs"><button id="import-tab">Import PDF</button><button class="secondary" id="manual-tab">Manual editor</button><button class="secondary" id="subject-tab">Subject mappings</button><button class="secondary" id="teacher-tab">Teacher mappings</button><button class="secondary" id="class-tab">Class schedules</button><button class="secondary" id="teacher-schedules-tab">Teacher schedules</button></div><div id="schedule-workspace"><div class="two-col"><div class="panel"><h2>Import a school timetable</h2><p class="muted">Upload → Parse → Review → Validate → Publish</p><form id="import-form"><label>Schedule type<select name="type" required><option value="TEACHER">For teachers — all teacher tables in this PDF</option><option value="CLASS">For students — all class tables in this PDF</option><option value="AUTO" selected>Automatic — detect teachers or classes</option></select></label><p class="hint">Select both PDFs together. Every table is imported, not just one selected teacher. Headings identify teachers or classes. Missing class codes are added to the class catalogue; teacher schedules are retained even before their accounts exist. Ambiguous names require review.</p><label>PDF file<input name="file" type="file" accept="application/pdf" multiple required></label><label>Academic year<input name="academic_year" value="2026–2027" required></label><label>Version / date<input name="version_label" placeholder="21.09.2026" required></label><label>Effective from<input name="effective_from" type="date" required></label><label>Comment<textarea name="comment"></textarea></label><button>Upload timetable PDFs</button><p id="upload-state" role="status"></p><div id="import-results"></div></form></div><div class="panel"><h2>Review before release</h2><p class="muted">Original PDFs are retained for audit. Student and teacher apps receive structured lessons from the API.</p><p class="hint">Publish the entire PDF once after review. Unknown subject codes and ambiguous teacher names need correction; teachers without accounts are retained by name and linked later.</p><h3>Separate schedule sources</h3><p class="muted">Class imports answer “what does this class study?” Teacher imports answer “where does this teacher teach?”</p></div></div></div><div class="panel spacer"><h2>Import history & versions</h2><div class="table-wrap"><table><thead><tr><th>Version</th><th>Type</th><th>Effective</th><th>Status</th><th>Actions</th></tr></thead><tbody>${history.map((i) => `<tr><td>${esc(i.version_label)}</td><td>${i.type}</td><td>${esc(i.effective_from)}</td><td><span class="badge">${i.status}</span> ${i.is_current ? "Current" : ""}</td><td><button class="secondary review" data-id="${i.id}">Review</button>${i.version_id ? `<button class="secondary restore" data-id="${i.version_id}">Restore</button><button class="secondary clone" data-id="${i.id}">Edit a copy</button>` : ""}</td></tr>`).join("") || '<tr><td colspan="5">No imports yet</td></tr>'}</tbody></table></div></div>`;
+    `<div class="tabs"><button id="import-tab">Import PDF</button><button class="secondary" id="manual-tab">Manual editor</button><button class="secondary" id="subject-tab">Subject mappings</button><button class="secondary" id="teacher-tab">Teacher mappings</button><button class="secondary" id="class-tab">Class schedules</button><button class="secondary" id="teacher-schedules-tab">Teacher schedules</button></div><div id="schedule-workspace"><div class="two-col"><div class="panel"><h2>Import a school timetable</h2><p class="muted">Upload → Parse → Review → Validate → Publish</p><form id="import-form"><label>Schedule type<select name="type" required><option value="TEACHER">For teachers — all teacher tables in this PDF</option><option value="CLASS">For students — all class tables in this PDF</option><option value="AUTO" selected>Automatic — detect teachers or classes</option></select></label><p class="hint">Select both PDFs together. Every table is imported, not just one selected teacher. Headings identify teachers or classes. Missing class codes are added to the class catalogue; teacher schedules are retained even before their accounts exist. Ambiguous names remain unassigned until manual mapping.</p><label>PDF file<input name="file" type="file" accept="application/pdf" multiple required></label><label>Academic year<input name="academic_year" value="2026–2027" required></label><label>Version / date<input name="version_label" placeholder="21.09.2026" required></label><label>Effective from<input name="effective_from" type="date" required></label><p id="date-hint" class="hint">Effective date is your selected calendar date, never a lesson or table date.</p><label><input name="effective_date_confirmed" type="checkbox" value="true" required> I confirm the effective date shown above.</label><label>Comment<textarea name="comment"></textarea></label><button>Upload timetable PDFs</button><p id="upload-state" role="status"></p><div id="import-results"></div></form></div><div class="panel"><h2>Review before release</h2><p class="muted">Original PDFs are retained for audit. Student and teacher apps receive structured lessons from the API.</p><p class="hint">Publish the entire PDF once after review. New subject codes are saved automatically. Missing or ambiguous teacher accounts remain unassigned and can be linked later. Only fatal structural issues prevent publication.</p><h3>Separate schedule sources</h3><p class="muted">Class imports answer “what does this class study?” Teacher imports answer “where does this teacher teach?”</p></div></div></div><div class="panel spacer"><h2>Import history & versions</h2><div class="table-wrap"><table><thead><tr><th>Version</th><th>Type</th><th>Effective</th><th>Status</th><th>Actions</th></tr></thead><tbody>${history.map((i) => `<tr><td>${esc(i.version_label)}</td><td>${i.type}</td><td>${esc(i.effective_from)}</td><td><span class="badge">${i.status}</span> ${i.is_current ? "Current" : ""}</td><td><button class="secondary review" data-id="${i.id}">Review</button><button class="danger import-delete" data-id="${i.id}">Delete</button>${i.version_id ? `<button class="secondary restore" data-id="${i.version_id}">Restore</button><button class="secondary clone" data-id="${i.id}">Edit a copy</button>` : ""}</td></tr>`).join("") || '<tr><td colspan="5">No imports yet</td></tr>'}</tbody></table></div></div>`;
+  document.querySelectorAll(".import-delete").forEach((button) => {
+    button.onclick = () => deleteImport(history.find((item) => item.id === button.dataset.id));
+  });
+  $("#import-form").elements.file.onchange = (event) => {
+    const dates = [...new Set([...event.target.files].flatMap((file) => versionDates(file.name)))];
+    const form = $("#import-form");
+    form.elements.effective_date_confirmed.checked = false;
+    if (dates.length === 1 && !form.elements.effective_from.value) form.elements.effective_from.value = dates[0];
+    $("#date-hint").textContent = dates.length === 1
+      ? `PDF filename version date: ${dates[0]}. Confirm the effective date before uploading.`
+      : "No single filename version date. Choose and confirm the effective date explicitly.";
+  };
+  $("#import-form").elements.effective_from.oninput = () => {
+    $("#import-form").elements.effective_date_confirmed.checked = false;
+  };
   $("#subject-tab").onclick = () => list("subject-mappings");
   $("#teacher-tab").onclick = () => list("teacher-mappings");
   $("#import-tab").onclick = schedules;
@@ -731,6 +758,39 @@ async function schedules() {
       }),
   );
 }
+function versionDates(name) {
+  return [...name.matchAll(/(?:^|[^0-9])(\d{2})\.(\d{2})\.(\d{4})(?![0-9])/g)].flatMap((match) => {
+    const value = `${match[3]}-${match[2]}-${match[1]}`;
+    const date = new Date(value + "T00:00:00Z");
+    return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value ? [value] : [];
+  });
+}
+function deleteImport(item) {
+  const dialog = document.createElement("dialog");
+  dialog.id = "delete-import-dialog";
+  dialog.innerHTML = `<h2>Delete this imported schedule version?</h2><p>${esc(item.version_label)} · ${esc(item.effective_from)} · ${esc(item.type)}</p><p>Only this import and its artifacts will be deleted.</p>${item.version_id ? '<p role="alert">This version was published. Deleting it also removes its published lessons, including the active schedule if selected. Other versions are preserved; an older eligible version may become effective.</p><label><input id="confirm-published-delete" type="checkbox"> Separately confirm deletion of this published schedule and its lessons.</label>' : ""}<div class="toolbar"><button type="button" class="secondary" id="cancel-import-delete">Cancel</button><button type="button" class="danger" id="confirm-import-delete" ${item.version_id ? "disabled" : ""}>Delete</button></div><p role="alert" id="delete-import-error"></p>`;
+  document.body.append(dialog);
+  dialog.addEventListener("close", () => dialog.remove());
+  dialog.querySelector("#cancel-import-delete").onclick = () => dialog.close();
+  const submit = dialog.querySelector("#confirm-import-delete");
+  const published = dialog.querySelector("#confirm-published-delete");
+  if (published) published.onchange = () => { submit.disabled = !published.checked; };
+  submit.onclick = async () => {
+    submit.disabled = true;
+    try {
+      await api("/admin/schedules/import/" + item.id, "DELETE", {
+        confirm: true, confirm_delete_published_version: published?.checked === true,
+      });
+      dialog.close();
+      toast("Imported schedule version deleted");
+      await schedules();
+    } catch (error) {
+      dialog.querySelector("#delete-import-error").textContent = error.message;
+      submit.disabled = false;
+    }
+  };
+  dialog.showModal();
+}
 async function reviewImport(id) {
   currentImport = await api("/admin/schedules/import/" + id);
   draft = currentImport.draft;
@@ -741,7 +801,7 @@ async function reviewImport(id) {
   }
   const locked = ["PUBLISHED", "SUPERSEDED"].includes(currentImport.status);
   $("#schedule-workspace").innerHTML =
-    `<div class="panel"><div class="toolbar"><h2>${esc(currentImport.version_label)} · ${currentImport.type}</h2>${currentImport.media_id ? '<button class="secondary" id="pdf-source">Original PDF</button>' : ""}<button class="secondary" id="reparse" ${locked ? "disabled" : ""}>Parse again</button></div><p class="muted">${draft.pages_parsed || 0} pages · ${draft.identities?.length || 0} identities · ${draft.entries?.length || 0} lesson slots · ${currentImport.status}</p><div class="toolbar"><select id="identity-select"></select><button class="secondary" id="create-classes" ${locked ? "disabled" : ""}>Create missing classes…</button><button class="secondary" id="save-cells" ${locked ? "disabled" : ""}>Save & validate</button><button id="publish" ${locked ? "disabled" : ""}>Publish all schedules</button></div><p class="hint">Teachers are matched automatically to active teacher accounts by name. Ambiguous names need a Teacher mapping; names without accounts are retained for later assignment. Class codes are added from the PDF automatically. Teacher schedules without accounts are retained by name and linked when their accounts are created. Unknown subject abbreviations still require a Subject mapping. Publish applies to every table in this PDF.</p>${currentImport.type === "TEACHER" ? '<div id="teacher-match"></div>' : ""}<div id="review-layout"><div id="schedule-grid"></div><div id="source-pane" hidden></div></div><div class="issues">${issueSummary(currentImport.issues || [])}</div>${currentImport.issues.some((issue) => issue.code === "SOURCE_SUBJECT_DISAGREEMENT") ? `<label><input type="checkbox" id="ack-source-disagreements" ${locked && draft.source_disagreements_acknowledged ? "checked disabled" : ""}> I reviewed the subject differences between the class and teacher PDFs. Keep both schedules as independent sources.</label>` : ""}${draft.issues?.some((i) => i.severity === "ERROR") ? '<label><input type="checkbox" id="ack-parser-issues"> I corrected the structural parser issues in this draft.</label>' : ""}</div>`;
+    `<div class="panel"><div class="toolbar"><h2>${esc(currentImport.version_label)} · ${currentImport.type}</h2>${currentImport.media_id ? '<button class="secondary" id="pdf-source">Original PDF</button>' : ""}<button class="secondary" id="reparse" ${locked ? "disabled" : ""}>Parse again</button></div><p class="muted">${draft.pages_parsed || 0} pages · ${draft.identities?.length || 0} identities · ${draft.entries?.length || 0} lesson slots · ${currentImport.status}</p><p class="hint">Effective: ${esc(currentImport.effective_from)} · ${currentImport.summary?.merged_slots || 0} expanded merged slots · ${currentImport.summary?.warnings || 0} warnings · ${currentImport.summary?.blocking || 0} blocking issues · ${currentImport.summary?.publish_allowed ? "Publication allowed" : "Correct fatal issues before publication"}</p><div class="toolbar"><select id="identity-select"></select><button class="secondary" id="create-classes" ${locked ? "disabled" : ""}>Create missing classes…</button><button class="secondary" id="save-cells" ${locked ? "disabled" : ""}>Save & validate</button><button id="publish" ${locked || !currentImport.summary?.publish_allowed ? "disabled" : ""}>Publish all schedules</button></div><p class="hint">Teachers are matched automatically to active teacher accounts by name. Ambiguous names need a Teacher mapping; names without accounts are retained for later assignment. Class codes are added from the PDF automatically. Teacher schedules without accounts are retained by name and linked when their accounts are created. Subject codes are saved automatically; optional mappings can be edited later. Publish applies to every table in this PDF.</p>${currentImport.type === "TEACHER" ? '<div id="teacher-match"></div>' : ""}<div id="review-layout"><div id="schedule-grid"></div><div id="source-pane" hidden></div></div><div class="issues">${issueSummary(currentImport.issues || [])}</div>${draft.issues?.some((i) => i.severity === "ERROR") ? '<label><input type="checkbox" id="ack-parser-issues"> I corrected the structural parser issues in this draft.</label>' : ""}</div>`;
   const identities = [
     ...new Set((draft.entries || []).map((e) => e.source_identity)),
   ];
@@ -780,22 +840,10 @@ async function reviewImport(id) {
       )
     )
       return;
-    const warnings = currentImport.issues.some((i) => i.severity === "WARNING");
-    if (
-      warnings &&
-      !confirm(
-        "Merged cells or other warnings remain. Confirm that you reviewed them.",
-      )
-    )
-      return;
     try {
       await saveCells();
       await api("/admin/schedules/import/" + id + "/publish", "POST", {
         confirm: true,
-        confirm_warnings:
-          warnings || $("#ack-source-disagreements")?.checked === true,
-        confirm_source_disagreements:
-          $("#ack-source-disagreements")?.checked === true,
       });
       toast("Schedule published");
       await schedules();
@@ -840,12 +888,13 @@ function renderGrid() {
   if (identity === "__ALL__") {
     const summaries = currentImport.schedule_summaries || [];
     const labels = {
-      READY: "Matched / ready",
-      AWAITING_ACCOUNT: "Stored by name · awaiting teacher account",
-      NEEDS_REVIEW: "Needs correction",
+      READY: "Ready",
+      READY_WITH_WARNINGS: "Ready with warnings",
+      NEEDS_REVIEW: "Needs review",
+      FAILED: "Needs correction",
     };
     $("#schedule-grid").innerHTML =
-      `<p class="hint">${summaries.length} schedules · ${draft.entries?.length || 0} lessons. Publishing saves every table; select a heading above to inspect individual lessons.</p><div class="table-wrap"><table><thead><tr><th>${currentImport.type === "TEACHER" ? "Teacher from PDF" : "Class from PDF"}</th><th>Lessons</th><th>Assignment</th></tr></thead><tbody>${summaries.map((row) => `<tr><td>${esc(row.identity)}</td><td>${row.lesson_count}</td><td>${esc(labels[row.status] || row.status)}</td></tr>`).join("")}</tbody></table></div>`;
+      `<p class="hint">${summaries.length} schedules · ${draft.entries?.length || 0} lessons. Publishing saves every table; select a heading above to inspect individual lessons.</p><div class="table-wrap"><table><thead><tr><th>${currentImport.type === "TEACHER" ? "Teacher from PDF" : "Class from PDF"}</th><th>Lessons</th><th>Assignment</th></tr></thead><tbody>${summaries.map((row) => `<tr><td>${esc(row.identity)}</td><td>${row.lesson_count}</td><td>${esc(labels[row.status] || row.status)}${currentImport.type === "TEACHER" && !row.teacher_id && row.status !== "FAILED" ? " · stored by name / awaiting account mapping" : ""}</td></tr>`).join("")}</tbody></table></div>`;
     const matching = $("#teacher-match");
     if (matching) matching.innerHTML = "";
     return;
@@ -954,7 +1003,7 @@ async function manual() {
       : "Teacher name as confirmed in mapping",
   );
   if (!identity) return;
-  const date = prompt("Effective from (YYYY-MM-DD)", "2026-10-12");
+  const date = prompt("Choose effective from (YYYY-MM-DD)", "");
   try {
     const item = await api("/admin/schedules/manual", "POST", {
       type,
@@ -1008,6 +1057,7 @@ function issueSummary(issues) {
       issue.severity +
       "|" +
       issue.message +
+      (issue.code === "PENDING_SUBJECT" ? "|" + issue.source_code : "") +
       (issue.code === "SOURCE_SUBJECT_DISAGREEMENT"
         ? "|" +
           issue.class_name +
@@ -1030,7 +1080,7 @@ function issueSummary(issues) {
   return [...categories.values()]
     .map(
       (i) =>
-        `<p><span class="badge ${i.severity.toLowerCase()}">${i.severity}</span> ${esc(i.message)}${i.code === "SOURCE_SUBJECT_DISAGREEMENT" ? " · " + esc(i.class_name) + ", day " + i.weekday + ", lesson " + i.lesson_number + ": PDF " + esc(i.source_subject_code) + " / other PDF " + esc(i.other_subject_code) : ""} · <strong>${i.count} affected cells</strong>${i.examples.length ? " · examples: " + i.examples.join(", ") : ""}</p>`,
+        `<p><span class="badge ${i.severity.toLowerCase()}">${i.severity}</span> ${esc(i.message)}${i.code === "PENDING_SUBJECT" ? " · " + esc(i.source_code) : ""}${i.code === "SOURCE_SUBJECT_DISAGREEMENT" ? " · " + esc(i.class_name) + ", day " + i.weekday + ", lesson " + i.lesson_number + ": PDF " + esc(i.source_subject_code) + " / other PDF " + esc(i.other_subject_code) : ""} · <strong>${i.count} affected cells</strong>${i.examples.length ? " · examples: " + i.examples.join(", ") : ""}</p>`,
     )
     .join("");
 }

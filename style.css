@@ -332,9 +332,14 @@ tr:last-child td {
   white-space: nowrap;
   font-size: 10px;
 }
-.badge.error {
+.badge.error,
+.badge.fatal {
   color: #a42c40;
   background: #ffeded;
+}
+.badge.info {
+  background: #eef3fa;
+  color: #345174;
 }
 .badge.warning {
   background: #fff5d4;
