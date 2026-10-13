@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { createServer } from "node:http";
-import { readFile, mkdtemp, rm } from "node:fs/promises";
+import { readFile, mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { spawn } from "node:child_process";
@@ -53,7 +53,7 @@ before(async () => {
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   site = `http://127.0.0.1:${server.address().port}`;
-  const script = `from backend import app as core\nwith core.db() as c:\n core.insert(c, 'users', {'id': 'login-test-admin', 'role': 'ADMIN', 'name': 'Login', 'surname': 'QA', 'email': '${email}', 'password_hash': core.password_hash('${password}')})\nfrom backend.entrypoint import main\nmain()`;
+  const script = `from backend import app as core\nwith core.db() as c:\n core.insert(c, 'users', {'id': 'login-test-admin', 'role': 'ADMIN', 'name': 'Login', 'surname': 'QA', 'email': '${email}', 'password_hash': core.password_hash('${password}')})\nfrom backend.parser import AscClassScheduleParser, AscTeacherScheduleParser\nfrom pathlib import Path\nfixtures=Path('backend/tests/fixtures')\ncodes={e['subject_code'] for parser,name in [(AscClassScheduleParser(),'classes.pdf'),(AscTeacherScheduleParser(),'teachers.pdf')] for e in parser.parse(fixtures/name)['entries']}\nwith core.db() as c:\n for code in sorted(codes):\n  ident=core.uid()\n  core.insert(c,'subjects',{'id':ident,'name':'Confirmed '+code})\n  core.insert(c,'subject_mappings',{'id':core.uid(),'source_code':code,'display_name':'Confirmed '+code,'subject_id':ident})\nfrom backend.entrypoint import main\nmain()`;
   backend = spawn(process.env.ZAHS_TEST_PYTHON || "python", ["-c", script], {
     cwd: workspace,
     env: {
@@ -76,7 +76,7 @@ before(async () => {
     },
     stdio: "ignore",
   });
-  for (let attempt = 0; attempt < 100; attempt++) {
+  for (let attempt = 0; attempt < 600; attempt++) {
     if (backend.exitCode !== null)
       throw Error("Disposable QA backend exited before readiness");
     try {
@@ -84,7 +84,7 @@ before(async () => {
     } catch {
       /* Backend starts asynchronously. */
     }
-    if (attempt === 99)
+    if (attempt === 599)
       throw Error("Disposable QA backend did not become ready");
     await wait(100);
   }
@@ -211,6 +211,71 @@ test("schedule import defaults to auto detection and accepts both PDFs", async (
   assert.match(results, /classes\.pdf · CLASS · 30 headings/);
   assert.match(results, /teachers\.pdf · TEACHER · 56 headings/);
   assert.ok(!results.includes("Unrecognized table identity"));
+  await page.locator(".batch-review").nth(1).click();
+  await page.locator("#identity-select").waitFor();
+  assert.equal(await page.locator("#identity-select").inputValue(), "__ALL__");
+  assert.equal(await page.locator("#schedule-grid tbody tr").count(), 56);
+  assert.match(
+    await page.locator("#schedule-grid").innerText(),
+    /Teacher from PDF/i,
+  );
+  assert.equal(
+    await page.locator("#publish").innerText(),
+    "Publish all schedules",
+  );
+  await page.locator("#identity-select").selectOption("Ferqana Isayeva");
+  await page.locator("#schedule-grid table.schedule").waitFor();
+  await page.locator("#identity-select").selectOption("__ALL__");
+  assert.equal(await page.locator("#schedule-grid tbody tr").count(), 56);
+  assert.match(
+    await page.locator("#schedule-grid").innerText(),
+    /awaiting teacher account/,
+  );
+  page.on("dialog", (dialog) => dialog.accept());
+  await page.locator("#import-tab").click();
+  await page
+    .locator("tr")
+    .filter({ hasText: /Two source PDFs QA/ })
+    .filter({ hasText: /CLASS/ })
+    .locator(".review")
+    .click();
+  await page.locator("#publish").click();
+  await page.locator("#import-form").waitFor();
+  await page
+    .locator("tr")
+    .filter({ hasText: /Two source PDFs QA/ })
+    .filter({ hasText: /TEACHER/ })
+    .locator(".review")
+    .click();
+  await page.locator("#ack-source-disagreements").waitFor();
+  assert.equal(
+    await page.locator("#ack-source-disagreements").isChecked(),
+    false,
+  );
+  await page.locator("#ack-source-disagreements").check();
+  await page.locator("#publish").click();
+  await page.locator("#import-form").waitFor();
+  assert.equal(
+    await page
+      .locator("tr")
+      .filter({ hasText: /Two source PDFs QA/ })
+      .filter({ hasText: /PUBLISHED/ })
+      .count(),
+    2,
+  );
+  await page
+    .locator("tr")
+    .filter({ hasText: /Two source PDFs QA/ })
+    .filter({ hasText: /TEACHER/ })
+    .locator(".review")
+    .click();
+  await page.locator("#identity-select").waitFor();
+  assert.equal(await page.locator("#schedule-grid tbody tr").count(), 56);
+  await mkdir(join(workspace, "analysis", "bulk-pdf"), { recursive: true });
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({
+    path: join(workspace, "analysis", "bulk-pdf", "admin-all-teachers.png"),
+  });
   await page.close();
 });
 
