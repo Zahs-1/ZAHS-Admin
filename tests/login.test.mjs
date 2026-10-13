@@ -373,6 +373,73 @@ test("expired session returns to login and clears the stored token", async () =>
   await page.close();
 });
 
+test("news gallery selects, removes, reorders, saves and edits actual private image uploads", async () => {
+  const page = await browser.newPage();
+  await page.goto(site + "/ZAHS-Admin/");
+  await page.locator("#login-code").fill(code);
+  await page.locator("#login-form button").click();
+  await page.locator("#shell").waitFor({state: "visible"});
+  await page.locator('a[href="#news"]').first().click();
+  await page.locator("#new").click();
+  await page.locator('[name="title"]').fill("Gallery browser QA");
+  await page.locator('[name="body"]').fill("Multiple private news images");
+  const files = (name) => join(workspace, "backend/tests/fixtures/news-gallery", name);
+  await page.locator("#news-image").setInputFiles([files("photo.png"), files("photo.jpeg"), files("photo.webp")]);
+  assert.equal(await page.locator(".news-image-row").count(), 3);
+  await page.locator(".image-remove").nth(1).click();
+  assert.equal(await page.locator(".news-image-row").count(), 2);
+  await page.locator(".image-up").nth(1).click();
+  assert.match(await page.locator(".news-image-row").first().innerText(), /photo.webp/);
+  await page.locator('[name="is_published"]').check();
+  const saved = page.waitForRequest((request) => request.url() === apiBase + "/admin/resources/news" && request.method() === "POST");
+  await page.locator("#save").click();
+  const payload = (await saved).postDataJSON();
+  assert.equal(payload.image_ids.length, 2);
+  await page.locator("#dialog").waitFor({state: "hidden"});
+  const row = page.locator("tr").filter({hasText: "Gallery browser QA"});
+  await row.locator(".edit").click();
+  assert.equal(await page.locator(".news-image-row").count(), 2);
+  await page.locator(".image-remove").first().click();
+  await page.locator("#news-image").setInputFiles(files("photo.jpeg"));
+  const updated = page.waitForRequest((request) => request.url().includes("/admin/resources/news/") && request.method() === "PATCH");
+  await page.locator("#save").click();
+  const ids = (await updated).postDataJSON().image_ids;
+  assert.equal(ids.length, 2);
+  assert.equal(ids[0], payload.image_ids[1]);
+  await page.locator("#dialog").waitFor({state: "hidden"});
+  const token = await page.evaluate(() => sessionStorage.getItem("zahs_admin"));
+  const news = await fetch(apiBase + "/news", {headers: {Authorization: "Bearer " + token}}).then((r) => r.json());
+  const gallery = news.find((item) => item.title === "Gallery browser QA");
+  assert.deepEqual(gallery.image_ids, ids);
+  assert.equal(gallery.media_id, ids[0]);
+  for (const media_id of ids) assert.equal((await fetch(apiBase + "/media/" + media_id + "/file", {headers: {Authorization: "Bearer " + token}})).status, 200);
+  await page.close();
+});
+
+test("one bad image keeps news text and successful uploads available for retry", async () => {
+  const page = await browser.newPage();
+  await page.goto(site + "/ZAHS-Admin/");
+  await page.locator("#login-code").fill(code);
+  await page.locator("#login-form button").click();
+  await page.locator("#shell").waitFor({state: "visible"});
+  await page.locator('a[href="#news"]').first().click();
+  await page.locator("#new").click();
+  await page.locator('[name="title"]').fill("Retry image QA");
+  await page.locator('[name="body"]').fill("Keep this news text");
+  await page.locator("#news-image").setInputFiles([join(workspace, "backend/tests/fixtures/news-gallery/photo.png"), join(workspace, "backend/tests/fixtures/news-gallery/bad.png")]);
+  await page.locator("#save").click();
+  await page.locator("#form-error").filter({hasText: "Some images could not upload"}).waitFor();
+  assert.equal(await page.locator('[name="body"]').inputValue(), "Keep this news text");
+  assert.equal(await page.locator(".news-image-row").count(), 2);
+  assert.match(await page.locator(".news-image-row").first().innerText(), /Uploaded/);
+  assert.equal(await page.locator(".image-error").count(), 1);
+  await page.locator(".image-remove").last().click();
+  await page.locator("#save").click();
+  await page.locator("#dialog").waitFor({state: "hidden"});
+  await page.locator("tr").filter({hasText: "Retry image QA"}).waitFor();
+  await page.close();
+});
+
 test("import deletion requires a dialog and separate published confirmation", async () => {
   const page = await browser.newPage();
   await page.goto(site + "/ZAHS-Admin/");

@@ -341,6 +341,13 @@ tr:last-child td {
   background: #eef3fa;
   color: #345174;
 }
+.news-image-list { display: grid; gap: 12px; margin: 12px 0; }
+.news-image-row { display: flex; align-items: flex-start; gap: 12px; padding: 12px; border: 1px solid #dcdbea; border-radius: 12px; }
+.news-image-row > div { min-width: 0; flex: 1; }
+.news-image-row strong { overflow-wrap: anywhere; }
+.news-image-row p { margin: 6px 0; }
+.news-image-row .toolbar { flex-wrap: wrap; }
+.image-error { color: #a22d40; }
 .badge.warning {
   background: #fff5d4;
   color: #8b6715;

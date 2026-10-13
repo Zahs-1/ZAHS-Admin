@@ -438,6 +438,9 @@ async function edit(name, item = {}) {
   const listFields = fields[name] || [];
   let classes = [],
     teachers = [];
+  let newsImages = (item.images?.length ? item.images : item.media_id ? [{media_id: item.media_id}] : [])
+    .map((image) => ({media_id: image.media_id || image.id, name: image.original_name || "Saved image", url: "", status: "Saved", error: ""}));
+  let uploadingImages = false, imageEditorClosed = false;
   const subjects = name === "subject-mappings"
     ? [...new Map((await allRecords("subject-mappings")).filter((mapping) => mapping.subject_id).map((mapping) => [mapping.subject_id, mapping])).values()]
     : [];
@@ -458,7 +461,7 @@ async function edit(name, item = {}) {
       if (k === "subject_id")
         return `<label>Canonical subject<select name="subject_id"><option value="">Use display name</option>${subjects.map((mapping) => `<option value="${esc(mapping.subject_id)}" ${mapping.subject_id === item.subject_id ? "selected" : ""}>${esc(mapping.display_name)}</option>`).join("")}</select></label>`;
       if (k === "media_id")
-        return '<label>News photograph<input type="file" id="news-image" accept="image/png,image/jpeg,image/webp"></label><div id="image-preview"></div>';
+        return '<label>Images<input type="file" id="news-image" accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp" multiple hidden></label><button type="button" class="secondary" id="add-news-images">Add images</button><p class="hint">Up to 20 PNG, JPG/JPEG or WEBP images. Each image may be up to 8 MB.</p><div id="image-preview" class="news-image-list" aria-live="polite"></div>';
       if (["active", "archived", "is_published"].includes(k))
         return `<label><input type="checkbox" name="${k}" ${(item[k] ?? (k === "active" ? 1 : 0)) ? "checked" : ""}> ${labels[k]}</label>`;
       if (["class_id", "class_teacher_id", "teacher_id"].includes(k)) {
@@ -477,16 +480,46 @@ async function edit(name, item = {}) {
       if (mapping) $("#form-fields [name=display_name]").value = mapping.display_name;
     };
   }
-  if ($("#news-image"))
+  const renderNewsImages = () => {
+    if (!$("#image-preview") || imageEditorClosed) return;
+    $("#image-preview").innerHTML = newsImages.map((image, index) => `<div class="news-image-row" data-index="${index}">${image.url ? `<img class="image-thumb" src="${esc(image.url)}" alt="${esc(image.name)}">` : '<span class="image-thumb">Image</span>'}<div><strong>${esc(image.name)}</strong><p class="${image.error ? "image-error" : "muted"}">${esc(image.error || image.status)}</p><div class="toolbar"><button type="button" class="secondary image-up" data-index="${index}" ${index === 0 || uploadingImages ? "disabled" : ""}>Move up</button><button type="button" class="secondary image-down" data-index="${index}" ${index === newsImages.length - 1 || uploadingImages ? "disabled" : ""}>Move down</button><button type="button" class="danger image-remove" data-index="${index}" ${uploadingImages ? "disabled" : ""}>Remove</button></div></div></div>`).join("");
+    $("#add-news-images").disabled = uploadingImages;
+    document.querySelectorAll(".image-remove").forEach((button) => button.onclick = () => {
+      const [removed] = newsImages.splice(Number(button.dataset.index), 1);
+      if (removed.url) URL.revokeObjectURL(removed.url);
+      renderNewsImages();
+    });
+    for (const [selector, direction] of [[".image-up", -1], [".image-down", 1]])
+      document.querySelectorAll(selector).forEach((button) => button.onclick = () => {
+        const index = Number(button.dataset.index), next = index + direction;
+        [newsImages[index], newsImages[next]] = [newsImages[next], newsImages[index]];
+        renderNewsImages();
+      });
+  };
+  if ($("#news-image")) {
+    $("#add-news-images").onclick = () => $("#news-image").click();
     $("#news-image").onchange = () => {
-      const f = $("#news-image").files[0];
-      if (f) {
-        const img = document.createElement("img");
-        img.className = "image-thumb";
-        img.src = URL.createObjectURL(f);
-        $("#image-preview").replaceChildren(img);
-      }
+      const files = [...$("#news-image").files];
+      if (newsImages.length + files.length > 20) { toast("Choose up to 20 images in total"); return; }
+      for (const file of files) newsImages.push({file, name: file.name, media_id: null, url: URL.createObjectURL(file), status: "Ready to upload", error: ""});
+      $("#news-image").value = "";
+      renderNewsImages();
     };
+    $("#dialog").addEventListener("close", () => {
+      imageEditorClosed = true;
+      newsImages.forEach((image) => { if (image.url) URL.revokeObjectURL(image.url); });
+    }, {once: true});
+    renderNewsImages();
+    for (const image of newsImages) {
+      fetch(API_BASE + "/admin/media/" + encodeURIComponent(image.media_id) + "/thumbnail", {headers: {Authorization: "Bearer " + token}})
+        .then(async (response) => {
+          if (!response.ok) throw Error("Preview unavailable");
+          const url = URL.createObjectURL(await response.blob());
+          if (imageEditorClosed || !newsImages.includes(image)) { URL.revokeObjectURL(url); return; }
+          image.url = url; renderNewsImages();
+        }).catch(() => { image.status = "Saved · preview unavailable"; renderNewsImages(); });
+    }
+  }
   modalSave = async () => {
     const data = Object.fromEntries(new FormData($("#edit-form")));
     for (const k of listFields) {
@@ -501,11 +534,24 @@ async function edit(name, item = {}) {
         data[k] = null;
     }
     if (item.id && !data.password) delete data.password;
-    if ($("#news-image")?.files[0]) {
-      const fd = new FormData();
-      fd.append("file", $("#news-image").files[0]);
-      fd.append("purpose", "NEWS");
-      data.media_id = (await api("/media", "POST", fd)).id;
+    if (name === "news") {
+      delete data.media_id;
+      uploadingImages = true;
+      try {
+        for (const [index, image] of newsImages.entries()) {
+          if (image.media_id) continue;
+          image.status = `Uploading ${index + 1} / ${newsImages.length}`; image.error = ""; renderNewsImages();
+          try {
+            if (!/\.(png|jpe?g|webp)$/i.test(image.file.name) || image.file.size > 8 * 1024 * 1024) throw Error("Choose a PNG, JPG/JPEG or WEBP image up to 8 MB");
+            const fd = new FormData(); fd.append("file", image.file); fd.append("purpose", "NEWS");
+            image.media_id = (await api("/media", "POST", fd)).id;
+            image.status = "Uploaded";
+          } catch (error) { image.error = error.message; image.status = "Upload failed"; }
+          renderNewsImages();
+        }
+      } finally { uploadingImages = false; renderNewsImages(); }
+      if (newsImages.some((image) => !image.media_id)) throw Error("Some images could not upload. Remove the failed image or retry Save. Your text and successful uploads are preserved.");
+      data.image_ids = newsImages.map((image) => image.media_id);
     }
     await api(
       "/admin/resources/" + name + (item.id ? "/" + item.id : ""),
